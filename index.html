@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://apps.bdimg.com/libs/jquery/2.1.4/jquery.min.js"></script>
+    <script src="https://cdn.bootcss.com/wordcloud2.js/1.1.0/wordcloud2.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <title>IMDB电影数据可视化</title>
+    <style>
+        .title{
+            font-size: 24px;
+            text-indent: 40px;
+            margin-top: 40px;
+        }
+        .charts{
+            width: 900px;
+            height: 600px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    
+    <div id="content" style="width: 100%;">
+        <div class="title">词云图</div>
+        <div id="canvas-container" style="width: 100%;display: flex; justify-content: center;">
+            <canvas id="canvas" width="800px" height="600px" ></canvas>
+        </div>
+
+        <div class="title">大众评分</div>
+        <div id="scoreBox" class="charts"></div>
+
+        <div class="title">媒体评分</div>
+        <div id="metaScoreBox" class="charts"></div>
+
+        <div class="title">历年上榜电影数目</div>
+        <div id="numEachYear" class="charts"></div>
+
+        <div class="title">限制等级分布图</div>
+		<div id="limit" class="charts"></div>
+		
+		<div class="title">多次上榜的导演和演员</div>
+		<div id="times" class="charts"></div>
+
+		<div class="title">电影票房与年份的关系</div>
+		<div id="gross" class="charts"></div>
+
+		<div class="title">投票次数和排名的关系</div>
+		<div id="votes" class="charts"></div>
+
+    </div>
+    <div id="webData" style="display: none;"></div>
+
+<script src="./data.js"></script>
+
+<script>
+    /*数据准备*/
+    let hundred = []
+    $('#webData').html(data);
+    let movieItems = $('.lister-item'); // 100个电影的原始信息
+    let name = [],
+        year = [],
+        limit = {},
+        runtime = [],
+        sort = [],
+        score = [],
+        metascore = [],
+        director = {},
+        stars = {},
+        votes = [],
+        gross = [];
+    for(let i = 0; i<100; i++){
+        hundred.push(i+1);
+        let node = $(movieItems[i]);
+        name.push([ node.find('h3 a').text(), (100-i)/10 ]);
+        year.push(parseInt(node.find('.lister-item-year').text().slice(1,5)));
+
+		// 限制等级
+		let limitStr = node.find('.certificate').text() ? node.find('.certificate').text() : '无';
+		if(limitStr.indexOf('(') > -1) limitStr = limitStr.slice(1,limitStr.length-1)
+		if(limitStr in limit){
+			limit[limitStr]++
+		}else{
+			limit[limitStr] = 1
+		}
+        runtime.push( parseInt( node.find('.runtime').text() ) );
+        sort.push(node.find('.genre').text());
+        let scoreStr = node.find('.ipl-rating-star__rating').text();
+        score.push(parseFloat( scoreStr.slice(0,scoreStr.indexOf('0')) ));
+        let metascoreStr = parseInt(node.find('span.metascore').text())
+        if(Number.isInteger(metascoreStr)){
+            metascore.push(metascoreStr);
+        }else{
+            metascore.push(90);
+        }
+        
+        let textMuted = node.find('p.text-muted')
+        // 各导演出现次数
+        let currentDirector = $(textMuted[1]).find('a')[0].innerText;
+        if(currentDirector in director){
+            director[currentDirector]++;
+        }else{
+            director[currentDirector] = 1;
+        }
+        // 各主演出现次数
+        for(let j = 1;j<=4;j++){
+            let currentStar = $(textMuted[1]).find('a')[j].innerText;
+            
+            if (currentStar in stars) {
+                director[currentStar]++;
+            }
+            else {
+                director[currentStar] = 1;
+            }
+        }
+        // 投票次数
+        votes.push([i+1,parseInt($( textMuted.find('[name=nv]')[0] ).attr('data-value'))])
+        // 票房
+        if($($(textMuted[2]).find('[name=nv]')[1]).attr('data-value')){
+            gross.push([year[i],getFloat($($(textMuted[2]).find('[name=nv]')[1]).attr('data-value'))])
+			console.log(getFloat($($(textMuted[2]).find('[name=nv]')[1]).attr('data-value')))
+        }
+    }
+
+    finallyYear = year.sort().filter(item => Number.isInteger(item))
+    year = []
+    for(let i =0;i<89;i++){
+        year.push(0)
+    }
+    for(let item of finallyYear){
+        year[item-1931]++;
+    }
+
+	let limitData = []
+	for(let key in limit){
+		limitData.push({
+			value:limit[key],
+			name:key
+		})
+	}
+
+	// 导演和演员数据的处理
+	let directorData = [];
+	for(key in director){
+		if(director[key] > 1)
+			directorData.push([key,director[key]])
+	}
+	let starsData = [];
+	for (key in director) {
+		if(stars[key] > 1)
+			starsData.push([key, stars[key]])
+	}
+
+    // 将带逗号的字符串转为数字
+    function getFloat(str){
+        return parseInt(str.replace(/,/g, ''))
+    }
+
+    // 封装的echarts函数
+    function makeChart(dom,option){
+        var myChart = echarts.init(dom);
+        myChart.setOption(option, true);
+    }
+
+</script>
+<script>
+    // 词云图
+    var options = {
+        "list": name,
+        "gridSize": 10, // size of the grid in pixels
+        "weightFactor": 5, // number to multiply for size of each word in the list
+        "fontWeight": 'normal', // 'normal', 'bold' or a callback
+        "fontFamily": 'Times, serif', // font to use
+        "color": 'random-light', // 'random-dark' or 'random-light'
+        "backgroundColor": '#333', // the color of canvas
+        "rotateRatio": 0.7, // probability for the word to rotate. 1 means always rotate
+    }
+    var canvas = document.getElementById('canvas');
+    WordCloud(canvas, options);
+
+    // 大众评分折线图
+    makeChart($('#scoreBox')[0], {
+            tooltip: {
+                trigger: 'axis'
+            },
+            toolbox: {
+                show: true,
+                feature: {
+                    dataZoom: {
+                        yAxisIndex: 'none'
+                    },
+                    dataView: { readOnly: false },
+                    magicType: { type: ['line', 'bar'] },
+                    restore: {},
+                    saveAsImage: {}
+                }
+            },
+            xAxis: {
+                type: 'category',
+                boundaryGap: false,
+                data: hundred,
+				name:'排名'
+            },
+            yAxis: {
+                type: 'value',
+                axisLabel: {
+                    formatter: '{value} 分'
+                },
+                min:5.4,
+				name:'大众评分'
+            },
+            series: [
+                {
+                    name: '评分',
+                    type: 'line',
+                    data: score,
+                    markPoint: {
+                        data: [
+                            { type: 'max', name: '最大值' },
+                            { type: 'min', name: '最小值' }
+                        ]
+                    },
+                    markLine: {
+                        data: [
+                            { type: 'average', name: '平均值' }
+                        ]
+                    }
+                },
+                
+            ]
+        })
+
+    // 媒体评分折线图
+    makeChart($('#metaScoreBox')[0], {
+            tooltip: {
+                trigger: 'axis'
+            },
+            toolbox: {
+                show: true,
+                feature: {
+                    dataZoom: {
+                        yAxisIndex: 'none'
+                    },
+                    dataView: { readOnly: false },
+                    magicType: { type: ['line', 'bar'] },
+                    restore: {},
+                    saveAsImage: {}
+                }
+            },
+            xAxis: {
+                type: 'category',
+                data: hundred,
+				name:'排名'
+            },
+            yAxis: {
+                type: 'value',
+                axisLabel: {
+                    formatter: '{value} 分'
+                },
+                min:50,
+				name:'媒体评分'
+            },
+            series: [
+                {
+                    name: '评分',
+                    type: 'line',
+                    data: metascore,
+                    markPoint: {
+                        data: [
+                            { type: 'max', name: '最大值' },
+                            { type: 'min', name: '最小值' }
+                        ]
+                    },
+                    markLine: {
+                        data: [
+                            { type: 'average', name: '平均值' }
+                        ]
+                    }
+                },
+            ]
+        })
+
+    let yearRange = [];
+    for(let i = 1931;i<2020;i++){
+        yearRange.push(i)
+    }
+    // 不同年份上榜电影数目
+    makeChart($('#numEachYear')[0], {
+            color: ['#3398DB'],
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: {            
+                    type: 'shadow'        
+                }
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: [
+                {
+                    type: 'category',
+                    data: yearRange,
+                    axisTick: {
+                        alignWithLabel: true
+                    },
+					name:'年份'
+                }
+            ],
+            yAxis: [
+                {
+                    type: 'value',
+					name:'上榜电影数目'
+                }
+            ],
+            series: [
+                {
+                    name: '上榜电影数量',
+                    type: 'bar',
+                    // barWidth: '60%',
+                    data: year
+                }
+            ]
+        })
+
+    // 限制等级分布
+    makeChart($('#limit')[0],{
+		tooltip: {
+			trigger: 'item',
+			formatter: '{a} <br/>{b} : {c} ({d}%)'
+		},
+		legend: {
+			// orient: 'vertical',
+			// top: 'middle',
+			bottom: 10,
+			left: 'center',
+			data: Object.keys(limit)
+		},
+		series: [
+			{
+				type: 'pie',
+				radius: '65%',
+				center: ['50%', '50%'],
+				selectedMode: 'single',
+				data: limitData,
+				emphasis: {
+					itemStyle: {
+						shadowBlur: 10,
+						shadowOffsetX: 0,
+						shadowColor: 'rgba(0, 0, 0, 0.5)'
+					}
+				}
+			}
+		]
+	})
+
+    // 上榜最多的导演和演员
+	makeChart($('#times')[0], {
+		dataset: {
+			source: [
+				['product', 'amount'],
+				...directorData,
+				...starsData
+			]
+		},
+		grid: { containLabel: true },
+		xAxis: { name: 'amount' },
+		yAxis: { type: 'category' },
+		series: [
+			{
+				type: 'bar',
+				encode: {
+					x: 'amount',
+					y: 'product'
+				}
+			}
+		]
+	})
+
+	// 票房和年份的散点图
+	makeChart($('#gross')[0], {
+		xAxis: {
+			min: 1931,
+			name:'年份'
+		},
+		yAxis: {
+			name:'票房',
+			min:20000,
+			max:900000000
+		},
+		series: [{
+			symbolSize: 10,
+			data:gross,
+			type: 'scatter'
+		}]
+	})
+
+	// 投票次数和名次的关系
+	makeChart($('#votes')[0], {
+		xAxis: {
+			name:'名次'
+		},
+		yAxis: {
+			name:'投票次数'
+		},
+		series: [{
+			symbolSize: 10,
+			data: votes,
+			type: 'scatter'
+		}]
+	})
+</script>
+</body>
+
+</html>
